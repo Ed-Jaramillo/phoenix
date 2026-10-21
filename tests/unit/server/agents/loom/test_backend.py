@@ -11,6 +11,7 @@ from phoenix.server.agents.loom.backend import (
     loom_config_from_provider_config,
     loom_context,
     loom_query,
+    loom_query_with_context,
     loom_session_id,
 )
 
@@ -97,3 +98,11 @@ def test_context_mapping() -> None:
     }
     assert loom_context(ResolvedContexts()) == {}
     assert loom_session_id(42) == "phx-42"
+
+
+def test_query_with_context() -> None:
+    assert loom_query_with_context("q", {}) == "q"
+    text = loom_query_with_context("Why?", {"phoenix.trace_id": "a" * 32})
+    assert text == (
+        'Why?\n\nPhoenix page context (JSON):\n{\n  "phoenix.trace_id": "' + "a" * 32 + '"\n}'
+    )

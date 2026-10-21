@@ -13,6 +13,7 @@ OpenAI-typed custom provider Phoenix already stores, so no new settings exist:
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -107,6 +108,20 @@ def loom_query(message: PhoenixUIMessage | None) -> str | None:
     return text or None
 
 
+# Heads the page-context block appended to the Loom query. looms does not
+# read WeaveRequest.context, so the agent sees the context only through this
+# block; the phoenix-copilot agent's prompt refers to this exact label.
+PAGE_CONTEXT_LABEL = "Phoenix page context (JSON):"
+
+
+def loom_query_with_context(query: str, context: Mapping[str, Any]) -> str:
+    """The user's text, followed by the page context as a labelled JSON block."""
+    if not context:
+        return query
+    block = json.dumps(dict(context), indent=2, sort_keys=True)
+    return f"{query}\n\n{PAGE_CONTEXT_LABEL}\n{block}"
+
+
 def loom_context(contexts: ResolvedContexts) -> dict[str, Any]:
     """Phoenix page context as ``WeaveRequest.context`` entries."""
     ctx: dict[str, Any] = {}
@@ -154,7 +169,7 @@ async def run_loom_turn(
             config=backend.config,
             agent_id=backend.agent_id,
             session_id=session_id,
-            query=query,
+            query=loom_query_with_context(query, context),
             context=context,
         )
         async for chunk in translate_weave_stream(events, translator):

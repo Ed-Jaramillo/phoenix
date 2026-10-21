@@ -157,7 +157,9 @@ async def test_loom_session_streams_and_persists_the_loom_turn(
     body = json.loads(sent.content)
     assert body["agent_id"] == "phoenix-copilot"
     assert body["session_id"] == f"phx-{rowid}"
-    assert body["query"] == "Why did this run fail?"
+    query_text, _, context_block = body["query"].partition("\n\nPhoenix page context (JSON):\n")
+    assert query_text == "Why did this run fail?"
+    assert json.loads(context_block)["phoenix.trace_id"] == TRACE_ID
     assert body["context"]["phoenix.trace_id"] == TRACE_ID
     assert body["context"]["phoenix.project_node_id"] == "UHJvamVjdDox"
 
