@@ -44,6 +44,7 @@ import {
   type RelayEnvironment,
 } from "@phoenix/components/agent/agentSessionRelay";
 import type { AgentStore } from "@phoenix/store/agentStore";
+import { generateUUID } from "@phoenix/utils/uuidUtils";
 
 import {
   SESSION_BUSY_ERROR_CODE,
@@ -201,7 +202,7 @@ export function createAgentSessionChat({
   const chat = new Chat<AgentUIMessage>({
     id: sessionId,
     messages: seedMessages,
-    generateId: () => crypto.randomUUID(),
+    generateId: () => generateUUID(),
     transport: new DefaultChatTransport({
       api: chatApiUrl,
       fetch: authFetch,

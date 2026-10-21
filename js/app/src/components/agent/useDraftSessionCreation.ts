@@ -19,6 +19,7 @@ import {
   AGENT_SESSIONS_CONNECTION_KEY,
   SETTINGS_AGENT_SESSIONS_CONNECTION_KEY,
 } from "./agentSessionRelay";
+import { generateUUID } from "@phoenix/utils/uuidUtils";
 import type { AgentChatOperationError } from "./types";
 
 const createAgentSessionMutation = graphql`
@@ -106,7 +107,7 @@ export function useDraftSessionCreation({
     setOperationError(null);
     isCreatingSessionRef.current = true;
     setPendingDraftUserMessage({
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       role: "user",
       parts: [{ type: "text", text }],
       metadata: buildUserMessageMetadata(),
