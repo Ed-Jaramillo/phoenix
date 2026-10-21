@@ -140,6 +140,14 @@ from phoenix.server.agents.github import (
     GitHubMCPConfig,
     resolve_github_mcp_config,
 )
+from phoenix.server.agents.loom.backend import (
+    loom_context,
+    loom_query,
+    loom_session_id,
+    resolve_loom_backend,
+    run_loom_turn,
+)
+from phoenix.server.agents.loom.translate import WeaveTranslator
 from phoenix.server.agents.model_factory import build_model
 from phoenix.server.agents.model_selection import AgentModelSelection
 from phoenix.server.agents.prompts import UI_STATE_TEMPLATE, AgentPrompts
@@ -3265,6 +3273,20 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
                             request.app.state.decrypt,
                             {credential.key: credential.value for credential in body.credentials},
                         )
+                # A custom provider labelled "loom" serves the turn from a Loom
+                # agent (phoenix.server.agents.loom); every other session runs
+                # the stock assistant below unchanged.
+                loom_backend = await resolve_loom_backend(
+                    session_model,
+                    db=db_session_factory,
+                    decrypt=request.app.state.decrypt,
+                )
+                loom_turn_query = loom_query(body.message) if loom_backend is not None else None
+                if loom_backend is not None and loom_turn_query is None:
+                    raise AgentError(
+                        "Loom agent sessions need a user message; tool output and "
+                        "approval continuations are not supported yet."
+                    )
                 model = await build_model(
                     session_model,
                     db=db_session_factory,
@@ -3447,6 +3469,16 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
                     usage=_get_current_context_usage(result),
                 )
 
+            async def _on_loom_complete(translator: WeaveTranslator) -> AsyncIterator[BaseChunk]:
+                nonlocal turn_final_output_text, turn_is_terminal
+                if translator.completed and not translator.failed:
+                    turn_is_terminal = True
+                    turn_final_output_text = (translator.final_text or "").strip() or None
+                yield _build_message_metadata_chunk(
+                    turn_trace_context=resolved_turn_trace_context,
+                    session_id=otel_session_id,
+                )
+
             async def _stream_with_session() -> AsyncIterator[BaseChunk]:
                 # The turn lock was claimed before this generator was built; keep
                 # its heartbeat fresh for as long as the turn is streaming.
@@ -3604,14 +3636,27 @@ def create_agents_router(authentication_enabled: bool) -> APIRouter:
                             session_id=otel_session_id,
                             user_email=phoenix_user_email if instrument_user_id else None,
                         )
-                    if session_needs_title:
+                    # Loom sessions skip the model-written title: the session's
+                    # "model" is a Loom agent, not a chat-completions endpoint.
+                    if session_needs_title and loom_backend is None:
                         summary_task = asyncio.create_task(_summarize_untitled_session())
                     with (
                         detached_otel_context(parent_context),
                         using_session(session_id=otel_session_id),
                         _maybe_using_user(instrument_user_id, phoenix_user_email),
                     ):
-                        raw_stream = adapter.run_stream(deps=deps, on_complete=_on_complete)
+                        raw_stream = (
+                            run_loom_turn(
+                                backend=loom_backend,
+                                session_id=loom_session_id(agent_session_rowid),
+                                query=loom_turn_query or "",
+                                context=loom_context(resolved_contexts),
+                                message_id=server_message_id,
+                                on_complete=_on_loom_complete,
+                            )
+                            if loom_backend is not None
+                            else adapter.run_stream(deps=deps, on_complete=_on_complete)
+                        )
                         assert _is_async_generator(raw_stream)
 
                         async def _agent_message_chunks() -> AsyncIterator[BaseChunk]:
